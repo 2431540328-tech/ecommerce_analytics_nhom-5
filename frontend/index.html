@@ -1,0 +1,841 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>E-Commerce Revenue Analytics & Forecasting Portal</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body class="bg-slate-100 text-slate-800">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+    const API_BASE = "http://localhost:8000/api/v1";
+    const fmtVND = (v) => new Intl.NumberFormat("vi-VN").format(Math.round(v || 0)) + " đ";
+
+    async function apiFetch(path, options = {}, token = null) {
+      const headers = { ...(options.headers || {}) };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      if (!(options.body instanceof FormData) && !headers["Content-Type"]) {
+        headers["Content-Type"] = "application/json";
+      }
+      const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(err.detail || "Lỗi API");
+      }
+      return res.json();
+    }
+
+    function App() {
+      const [token, setToken] = useState(localStorage.getItem("jwt_token") || "");
+      const [user, setUser] = useState(() => {
+        try { return JSON.parse(localStorage.getItem("user_info") || "null"); } catch { return null; }
+      });
+      const [tab, setTab] = useState("dashboard");
+      const [error, setError] = useState("");
+      const [email, setEmail] = useState("admin@vaa-ecommerce.vn");
+      const [password, setPassword] = useState("123456");
+
+      const handleLogin = async (e) => {
+        e.preventDefault();
+        setError("");
+        try {
+          const data = await apiFetch("/auth/login", {
+            method: "POST",
+            body: JSON.stringify({ email, password }),
+          });
+          localStorage.setItem("jwt_token", data.access_token);
+          localStorage.setItem("user_info", JSON.stringify(data.user));
+          setToken(data.access_token);
+          setUser(data.user);
+          setTab("dashboard");
+        } catch (err) {
+          setError(err.message);
+        }
+      };
+
+      const handleLogout = async () => {
+        try { await apiFetch("/auth/logout", { method: "POST" }, token); } catch {}
+        localStorage.removeItem("jwt_token");
+        localStorage.removeItem("user_info");
+        setToken("");
+        setUser(null);
+      };
+
+      if (!token || !user) {
+        return (
+          <div className="min-h-screen flex items-center justify-center bg-slate-900 px-4">
+            <form onSubmit={handleLogin} className="bg-white rounded-xl shadow-xl p-8 w-full max-w-md space-y-4">
+              <h1 className="text-xl font-bold text-[#1f4e78]">Đăng nhập Hệ thống Phân tích TMĐT</h1>
+              <div className="text-xs bg-slate-50 p-3 rounded border space-y-1 text-slate-600">
+                <div><b>Admin/Manager:</b> admin@vaa-ecommerce.vn / 123456</div>
+                <div><b>Data Analyst:</b> analyst@vaa-ecommerce.vn / 123456</div>
+              </div>
+              {error && <div className="p-2.5 bg-red-50 text-red-700 text-xs rounded">{error}</div>}
+              <div>
+                <label className="block text-xs font-semibold mb-1">Email</label>
+                <input value={email} onChange={(e) => setEmail(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" required />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold mb-1">Mật khẩu</label>
+                <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full border rounded-lg px-3 py-2 text-sm" required />
+              </div>
+              <button type="submit" className="w-full bg-[#1f4e78] text-white py-2.5 rounded-lg font-semibold text-sm hover:bg-blue-900">
+                Đăng nhập
+              </button>
+            </form>
+          </div>
+        );
+      }
+
+      const isAdmin = user.vaiTro === "ADMIN";
+      const tabs = isAdmin
+        ? [
+            { id: "dashboard", label: "Dashboard & KPI" },
+            { id: "forecast", label: "Dự báo & Khuyến nghị" },
+            { id: "rfm", label: "Phân khúc RFM" },
+            { id: "admin_models", label: "Duyệt Model & Cảnh báo" },
+            { id: "admin_sys", label: "Quản trị User & Audit" },
+          ]
+        : [
+            { id: "dashboard", label: "Dashboard & KPI" },
+            { id: "forecast", label: "Dự báo AI/ML" },
+            { id: "rfm", label: "Phân khúc RFM" },
+            { id: "etl", label: "ETL & Chất lượng" },
+            { id: "analyst_models", label: "Huấn luyện ML" },
+            { id: "deep_analytics", label: "Phân tích sâu & SLA" },
+          ];
+
+      return (
+        <div className="min-h-screen flex flex-col">
+          <header className={`${isAdmin ? "bg-[#1f4e78]" : "bg-slate-800"} text-white shadow`}>
+            <div className="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h1 className="font-bold text-base">HỆ THỐNG PHÂN TÍCH & DỰ BÁO DOANH THU TMĐT</h1>
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${isAdmin ? "bg-amber-400 text-slate-900" : "bg-emerald-400 text-slate-900"}`}>
+                    {isAdmin ? "ADMIN / MANAGER" : "DATA ANALYST"}
+                  </span>
+                </div>
+                <p className="text-xs text-blue-200">{user.hoTen} ({user.email})</p>
+              </div>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {tabs.map((t) => (
+                  <button
+                    key={t.id}
+                    onClick={() => setTab(t.id)}
+                    className={`px-3 py-1.5 rounded text-xs font-semibold ${tab === t.id ? "bg-white text-slate-900" : "bg-white/10 text-white hover:bg-white/20"}`}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+                <button onClick={handleLogout} className="px-3 py-1.5 rounded text-xs font-semibold bg-red-600 hover:bg-red-700 ml-1">
+                  Đăng xuất
+                </button>
+              </div>
+            </div>
+          </header>
+
+          <main className="max-w-7xl w-full mx-auto px-4 py-6 flex-1">
+            {tab === "dashboard" && <DashboardTab token={token} />}
+            {tab === "forecast" && <ForecastTab token={token} />}
+            {tab === "rfm" && <RfmTab token={token} />}
+            {tab === "admin_models" && isAdmin && <AdminModelsAlertsTab token={token} />}
+            {tab === "admin_sys" && isAdmin && <AdminSystemTab token={token} />}
+            {tab === "etl" && !isAdmin && <EtlTab token={token} />}
+            {tab === "analyst_models" && !isAdmin && <AnalystTrainTab token={token} />}
+            {tab === "deep_analytics" && !isAdmin && <DeepAnalyticsTab token={token} />}
+          </main>
+        </div>
+      );
+    }
+
+    // ==================== 1. DASHBOARD & KPI (CHUNG) ====================
+    function DashboardTab({ token }) {
+      const [data, setData] = useState(null);
+      const [dim, setDim] = useState("channel");
+      const [dimData, setDimData] = useState([]);
+      const [promo, setPromo] = useState(null);
+      const chartRef = useRef(null);
+      const chartInst = useRef(null);
+
+      useEffect(() => {
+        apiFetch("/analytics/dashboard", {}, token).then(setData).catch(console.error);
+        apiFetch("/analytics/promotions", {}, token).then(setPromo).catch(() => {});
+      }, [token]);
+
+      useEffect(() => {
+        apiFetch(`/analytics/multidimensional?dimension=${dim}`, {}, token)
+          .then((r) => setDimData(r.data || []))
+          .catch(console.error);
+      }, [dim, token]);
+
+      useEffect(() => {
+        if (!data || !chartRef.current) return;
+        if (chartInst.current) chartInst.current.destroy();
+        chartInst.current = new Chart(chartRef.current.getContext("2d"), {
+          type: "line",
+          data: {
+            labels: data.monthly_revenue.map((m) => m._id),
+            datasets: [{
+              label: "Doanh thu thuần (Triệu VNĐ)",
+              data: data.monthly_revenue.map((m) => Math.round(m.doanhThu / 1e6)),
+              borderColor: "#1f4e78",
+              tension: 0.25,
+            }],
+          },
+          options: { responsive: true, maintainAspectRatio: false },
+        });
+      }, [data]);
+
+      if (!data) return <div className="text-sm text-slate-500">Đang tải dữ liệu Dashboard...</div>;
+      const { kpi } = data;
+
+      return (
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+            <div className="bg-white p-4 rounded-xl shadow-sm border-l-4 border-[#1f4e78]">
+              <p className="text-xs font-bold text-slate-500">DOANH THU THUẦN</p>
+              <p className="text-xl font-extrabold text-[#1f4e78] mt-1">{fmtVND(kpi.net_revenue)}</p>
+            </div>
+            <div className="bg-white p-4 rounded-xl shadow-sm border-l-4 border-blue-500">
+              <p className="text-xs font-bold text-slate-500">TỔNG GMV</p>
+              <p className="text-xl font-extrabold text-blue-600 mt-1">{fmtVND(kpi.gmv)}</p>
+            </div>
+            <div className="bg-white p-4 rounded-xl shadow-sm border-l-4 border-emerald-600">
+              <p className="text-xs font-bold text-slate-500">ĐƠN HÀNG HOÀN TẤT</p>
+              <p className="text-xl font-extrabold text-emerald-700 mt-1">{kpi.total_orders.toLocaleString("vi-VN")}</p>
+            </div>
+            <div className="bg-white p-4 rounded-xl shadow-sm border-l-4 border-amber-500">
+              <p className="text-xs font-bold text-slate-500">AOV TRUNG BÌNH</p>
+              <p className="text-xl font-extrabold text-amber-600 mt-1">{fmtVND(kpi.aov)}</p>
+            </div>
+          </div>
+
+          {promo && (
+            <div className="bg-white p-4 rounded-xl shadow-sm flex flex-wrap gap-6 text-xs items-center">
+              <span className="font-bold text-[#1f4e78]">Hiệu quả Khuyến mãi / Double Day (FR-10):</span>
+              <span>TB ngày thường: <b>{fmtVND(promo.normal_avg_revenue)}</b></span>
+              <span>TB ngày Sale: <b className="text-emerald-700">{fmtVND(promo.promo_avg_revenue)}</b></span>
+              <span>Tăng trưởng: <b className="text-amber-600">+{promo.uplift_pct}%</b></span>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="lg:col-span-2 bg-white p-5 rounded-xl shadow-sm">
+              <div className="flex justify-between items-center mb-3">
+                <h2 className="font-bold text-[#1f4e78]">Doanh thu theo tháng</h2>
+                <button onClick={() => {
+                  fetch(`${API_BASE}/export/revenue`, { headers: { Authorization: `Bearer ${token}` } })
+                    .then(r => r.blob()).then(b => {
+                      const a = document.createElement("a");
+                      a.href = URL.createObjectURL(b);
+                      a.download = "bao_cao_doanh_thu.xlsx";
+                      a.click();
+                    });
+                }} className="text-xs bg-emerald-600 text-white px-3 py-1.5 rounded font-semibold">Xuất Excel (FR-11)</button>
+              </div>
+              <div className="h-72"><canvas ref={chartRef}></canvas></div>
+            </div>
+
+            <div className="bg-white p-5 rounded-xl shadow-sm">
+              <div className="flex justify-between items-center mb-3">
+                <h2 className="font-bold text-[#1f4e78]">Phân tích đa chiều (FR-09)</h2>
+                <select value={dim} onChange={(e) => setDim(e.target.value)} className="border rounded px-2 py-1 text-xs">
+                  <option value="channel">Kênh bán</option>
+                  <option value="category">Danh mục</option>
+                  <option value="region">Khu vực</option>
+                  <option value="sku">Top SKU</option>
+                  <option value="hour">Khung giờ</option>
+                </select>
+              </div>
+              <div className="max-h-72 overflow-y-auto text-xs divide-y">
+                {dimData.map((row, idx) => (
+                  <div key={idx} className="py-2 flex justify-between">
+                    <span className="font-medium">{String(row._id)}</span>
+                    <span className="font-bold text-[#1f4e78]">{fmtVND(row.doanhThu)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ==================== 2. DỰ BÁO AI/ML (CHUNG) ====================
+    function ForecastTab({ token }) {
+      const [category, setCategory] = useState("ALL");
+      const [horizon, setHorizon] = useState(30);
+      const [modelType, setModelType] = useState("Hybrid_Prophet_XGBoost");
+      const [result, setResult] = useState(null);
+      const [history, setHistory] = useState([]);
+      const [loading, setLoading] = useState(false);
+      const chartRef = useRef(null);
+      const chartInst = useRef(null);
+
+      const runForecast = async () => {
+        setLoading(true);
+        try {
+          const res = await apiFetch("/forecast/predict", {
+            method: "POST",
+            body: JSON.stringify({ horizon_days: Number(horizon), category, model_type: modelType, confidence_interval: 0.95 }),
+          }, token);
+          setResult(res);
+          apiFetch("/forecast/history?limit=10", {}, token).then(r => setHistory(r.history || []));
+        } catch (err) { alert(err.message); } finally { setLoading(false); }
+      };
+
+      useEffect(() => { runForecast(); }, []);
+
+      useEffect(() => {
+        if (!result || !chartRef.current) return;
+        if (chartInst.current) chartInst.current.destroy();
+        const labels = [...result.historical_series.map(d => d.ngay), ...result.forecast_series.map(d => d.ngay)];
+        const hist = [...result.historical_series.map(d => d.doanhThuThucTe / 1e6), ...new Array(result.forecast_series.length).fill(null)];
+        const lastH = result.historical_series[result.historical_series.length - 1]?.doanhThuThucTe / 1e6 || 0;
+        const fore = [...new Array(result.historical_series.length - 1).fill(null), lastH, ...result.forecast_series.map(d => d.doanhThuDuBao / 1e6)];
+
+        chartInst.current = new Chart(chartRef.current.getContext("2d"), {
+          type: "line",
+          data: {
+            labels,
+            datasets: [
+              { label: "Thực tế (Triệu VNĐ)", data: hist, borderColor: "#1f4e78", tension: 0.2 },
+              { label: "Dự báo AI (Triệu VNĐ)", data: fore, borderColor: "#ea580c", borderDash: [5, 5], tension: 0.2 },
+            ],
+          },
+          options: { responsive: true, maintainAspectRatio: false },
+        });
+      }, [result]);
+
+      return (
+        <div className="space-y-5">
+          <div className="bg-white p-5 rounded-xl shadow-sm flex flex-wrap gap-3 items-end">
+            <div>
+              <label className="block text-xs font-semibold mb-1">Ngành hàng</label>
+              <select value={category} onChange={(e) => setCategory(e.target.value)} className="border rounded px-3 py-2 text-sm">
+                <option value="ALL">Tất cả ngành hàng</option>
+                <option value="Thoi_Trang_Nam_Nu">Thời trang Nam Nữ</option>
+                <option value="Phu_Kien_Cong_Nghe">Phụ kiện Công nghệ</option>
+                <option value="My_Pham_Cham_Soc">Mỹ phẩm & Chăm sóc</option>
+                <option value="Gia_Dung_Thong_Minh">Gia dụng Thông minh</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1">Chu kỳ (Ngày)</label>
+              <select value={horizon} onChange={(e) => setHorizon(e.target.value)} className="border rounded px-3 py-2 text-sm">
+                <option value={7}>7 ngày</option>
+                <option value={14}>14 ngày</option>
+                <option value={30}>30 ngày</option>
+                <option value={90}>90 ngày (Theo quý)</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1">Mô hình</label>
+              <select value={modelType} onChange={(e) => setModelType(e.target.value)} className="border rounded px-3 py-2 text-sm">
+                <option value="Hybrid_Prophet_XGBoost">Hybrid Prophet + XGBoost</option>
+                <option value="XGBoost">XGBoost</option>
+                <option value="Prophet">Facebook Prophet</option>
+                <option value="SARIMA">SARIMA</option>
+              </select>
+            </div>
+            <button onClick={runForecast} disabled={loading} className="bg-[#1f4e78] text-white px-5 py-2 rounded text-sm font-semibold">
+              {loading ? "Đang dự báo..." : "Chạy Dự Báo"}
+            </button>
+          </div>
+
+          {result && (
+            <>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
+                <div className="bg-white p-4 rounded-xl shadow-sm"><b>MAPE:</b> {(result.metrics.MAPE * 100).toFixed(2)}%</div>
+                <div className="bg-white p-4 rounded-xl shadow-sm"><b>RMSE:</b> {fmtVND(result.metrics.RMSE)}</div>
+                <div className="bg-white p-4 rounded-xl shadow-sm"><b>R² Score:</b> {result.metrics.R2_Score}</div>
+                <div className="bg-white p-4 rounded-xl shadow-sm"><b>Tổng dự báo:</b> {fmtVND(result.total_forecast_revenue)}</div>
+              </div>
+              <div className="bg-white p-5 rounded-xl shadow-sm"><div className="h-80"><canvas ref={chartRef}></canvas></div></div>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                <div className="bg-white p-5 rounded-xl shadow-sm text-xs space-y-1">
+                  <h3 className="font-bold text-sm text-[#1f4e78] mb-2">Khuyến nghị hành động (FR-19)</h3>
+                  {result.recommendations.map((r, i) => <div key={i}>• {r}</div>)}
+                </div>
+                <div className="bg-white p-5 rounded-xl shadow-sm text-xs">
+                  <h3 className="font-bold text-sm text-[#1f4e78] mb-2">Lịch sử dự báo gần đây (FR-25)</h3>
+                  <div className="max-h-36 overflow-y-auto divide-y">
+                    {history.map((h) => (
+                      <div key={h._id} className="py-1.5 flex justify-between">
+                        <span>{h.tenMoHinh} ({h.chuKyDuBao}d)</span>
+                        <span>MAPE: <b>{(h.chiSoDanhGia?.MAPE * 100).toFixed(2)}%</b></span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      );
+    }
+
+    // ==================== 3. PHÂN KHÚC RFM (CHUNG) ====================
+    function RfmTab({ token }) {
+      const [segments, setSegments] = useState([]);
+      const [customers, setCustomers] = useState([]);
+      const [filterSeg, setFilterSeg] = useState("");
+      const [search, setSearch] = useState("");
+
+      useEffect(() => {
+        apiFetch("/rfm/summary", {}, token).then((r) => setSegments(r.segments || []));
+      }, [token]);
+
+      useEffect(() => {
+        const params = new URLSearchParams();
+        if (filterSeg) params.append("segment", filterSeg);
+        if (search) params.append("search", search);
+        apiFetch(`/rfm/customers?${params.toString()}`, {}, token).then((r) => setCustomers(r.customers || []));
+      }, [filterSeg, search, token]);
+
+      return (
+        <div className="space-y-5">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            {segments.map((s) => (
+              <div key={s._id} onClick={() => setFilterSeg(s._id === filterSeg ? "" : s._id)} className={`cursor-pointer bg-white p-4 rounded-xl shadow-sm border ${filterSeg === s._id ? "border-[#1f4e78] ring-2 ring-blue-200" : "border-slate-200"}`}>
+                <p className="text-xs font-bold text-slate-500">{s._id}</p>
+                <p className="text-xl font-bold text-[#1f4e78]">{s.count} KH</p>
+                <p className="text-xs text-slate-500">{fmtVND(s.total_monetary)}</p>
+              </div>
+            ))}
+          </div>
+          <div className="bg-white p-5 rounded-xl shadow-sm overflow-x-auto">
+            <div className="flex flex-wrap justify-between items-center gap-2 mb-3">
+              <h2 className="font-bold text-[#1f4e78]">Danh sách khách hàng RFM {filterSeg && `(${filterSeg})`}</h2>
+              <div className="flex gap-2">
+                <input placeholder="Tìm tên / mã KH..." value={search} onChange={e => setSearch(e.target.value)} className="border rounded px-2.5 py-1 text-xs" />
+                <button onClick={() => {
+                  const q = filterSeg ? `?segment=${encodeURIComponent(filterSeg)}` : "";
+                  fetch(`${API_BASE}/export/rfm${q}`, { headers: { Authorization: `Bearer ${token}` } })
+                    .then(r => r.blob()).then(b => {
+                      const a = document.createElement("a");
+                      a.href = URL.createObjectURL(b);
+                      a.download = "danh_sach_rfm.xlsx";
+                      a.click();
+                    });
+                }} className="bg-emerald-600 text-white px-3 py-1 rounded text-xs font-semibold">Xuất Excel (FR-15)</button>
+              </div>
+            </div>
+            <table className="w-full text-xs text-left">
+              <thead><tr className="bg-slate-100"><th className="p-2">Mã KH</th><th className="p-2">Tên KH</th><th className="p-2">Khu vực</th><th className="p-2">Recency</th><th className="p-2">Frequency</th><th className="p-2">Monetary</th><th className="p-2">Phân khúc</th></tr></thead>
+              <tbody className="divide-y">
+                {customers.map((c) => (
+                  <tr key={c._id}><td className="p-2">{c.maKhachHang}</td><td className="p-2 font-medium">{c.tenKhachHang}</td><td className="p-2">{c.khuVuc}</td><td className="p-2">{c.chiSoRecency} ngày</td><td className="p-2">{c.chiSoFrequency}</td><td className="p-2 font-bold">{fmtVND(c.chiSoMonetary)}</td><td className="p-2">{c.phanKhucRFM}</td></tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      );
+    }
+
+    // ==================== 4. ADMIN: DUYỆT MODEL, CẢNH BÁO & TRA CỨU ĐƠN ====================
+    function AdminModelsAlertsTab({ token }) {
+      const [models, setModels] = useState([]);
+      const [alerts, setAlerts] = useState([]);
+      const [orders, setOrders] = useState([]);
+      const [maDon, setMaDon] = useState("");
+
+      const loadAll = () => {
+        apiFetch("/models", {}, token).then(r => setModels(r.models || []));
+        apiFetch("/alerts", {}, token).then(r => setAlerts(r.alerts || []));
+        apiFetch(`/orders?limit=15${maDon ? `&ma_don=${encodeURIComponent(maDon)}` : ""}`, {}, token).then(r => setOrders(r.orders || []));
+      };
+      useEffect(() => { loadAll(); }, [token]);
+
+      const promote = async (id) => {
+        await apiFetch(`/models/${id}/promote`, { method: "POST" }, token);
+        loadAll();
+      };
+
+      return (
+        <div className="space-y-6">
+          <div className="bg-white p-5 rounded-xl shadow-sm space-y-2 text-xs">
+            <h3 className="font-bold text-sm text-[#1f4e78]">Cảnh báo vận hành (FR-20 → FR-22)</h3>
+            {alerts.length === 0 ? <p className="text-slate-500">Hệ thống ổn định, chưa có cảnh báo.</p> : alerts.map((a, i) => (
+              <div key={i} className="p-2.5 bg-amber-50 border-l-4 border-amber-500 rounded"><b>[{a.type}]</b> {a.message}</div>
+            ))}
+          </div>
+
+          <div className="bg-white p-5 rounded-xl shadow-sm overflow-x-auto">
+            <h3 className="font-bold text-sm text-[#1f4e78] mb-3">Phê duyệt & Rollback Phiên bản Mô hình (FR-06, FR-18)</h3>
+            <table className="w-full text-xs text-left">
+              <thead><tr className="bg-slate-100"><th className="p-2">Version</th><th className="p-2">Loại</th><th className="p-2">MAPE</th><th className="p-2">R²</th><th className="p-2">Người train</th><th className="p-2">Trạng thái</th><th className="p-2">Phê duyệt</th></tr></thead>
+              <tbody className="divide-y">
+                {models.map(m => (
+                  <tr key={m._id}>
+                    <td className="p-2 font-mono">{m.version}</td>
+                    <td className="p-2">{m.model_type}</td>
+                    <td className="p-2 font-bold">{(m.metrics.MAPE * 100).toFixed(2)}%</td>
+                    <td className="p-2">{m.metrics.R2_Score}</td>
+                    <td className="p-2">{m.created_by}</td>
+                    <td className="p-2"><span className={`px-2 py-0.5 rounded font-semibold ${m.status === "PRODUCTION" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>{m.status}</span></td>
+                    <td className="p-2">{m.status !== "PRODUCTION" && <button onClick={() => promote(m._id)} className="bg-[#1f4e78] text-white px-2.5 py-1 rounded text-xs">Triển khai Production</button>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="bg-white p-5 rounded-xl shadow-sm text-xs">
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="font-bold text-sm text-[#1f4e78]">Tra cứu đơn hàng (FR-24)</h3>
+              <div className="flex gap-2">
+                <input placeholder="Nhập mã đơn ORD-..." value={maDon} onChange={e => setMaDon(e.target.value)} className="border rounded px-2.5 py-1" />
+                <button onClick={loadAll} className="bg-slate-800 text-white px-3 py-1 rounded">Tìm</button>
+              </div>
+            </div>
+            <table className="w-full text-left">
+              <thead><tr className="bg-slate-100"><th className="p-2">Mã đơn</th><th className="p-2">Ngày đặt</th><th className="p-2">Kênh</th><th className="p-2">Doanh thu thuần</th><th className="p-2">Trạng thái</th></tr></thead>
+              <tbody className="divide-y">
+                {orders.map(o => (
+                  <tr key={o._id}><td className="p-2 font-mono">{o.maDonHang}</td><td className="p-2">{o.ngayDatHang?.slice(0, 10)}</td><td className="p-2">{o.kenhBanHang}</td><td className="p-2 font-bold">{fmtVND(o.doanhThuThuan)}</td><td className="p-2">{o.trangThaiDon}</td></tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      );
+    }
+
+    // ==================== 5. ADMIN: QUẢN LÝ USER, CONFIG, AUDIT LOG ====================
+    function AdminSystemTab({ token }) {
+      const [users, setUsers] = useState([]);
+      const [logs, setLogs] = useState([]);
+      const [config, setConfig] = useState(null);
+      const [newUser, setNewUser] = useState({ hoTen: "", email: "", password: "", vaiTro: "DATA_ANALYST" });
+
+      const load = () => {
+        apiFetch("/users", {}, token).then(r => setUsers(r.users || []));
+        apiFetch("/audit-logs?limit=20", {}, token).then(r => setLogs(r.logs || []));
+        apiFetch("/system/config", {}, token).then(setConfig);
+      };
+      useEffect(() => { load(); }, [token]);
+
+      const createUser = async (e) => {
+        e.preventDefault();
+        try {
+          await apiFetch("/users", { method: "POST", body: JSON.stringify(newUser) }, token);
+          setNewUser({ hoTen: "", email: "", password: "", vaiTro: "DATA_ANALYST" });
+          load();
+        } catch (err) { alert(err.message); }
+      };
+
+      const toggleActive = async (u) => {
+        await apiFetch(`/users/${u._id}`, { method: "PATCH", body: JSON.stringify({ trangThai: !u.trangThai }) }, token);
+        load();
+      };
+
+      const saveConfig = async (e) => {
+        e.preventDefault();
+        await apiFetch("/system/config", { method: "PUT", body: JSON.stringify(config) }, token);
+        alert("Đã lưu cấu hình hệ thống!");
+      };
+
+      return (
+        <div className="space-y-6 text-xs">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="bg-white p-5 rounded-xl shadow-sm space-y-3">
+              <h3 className="font-bold text-sm text-[#1f4e78]">Quản lý Tài khoản & Phân quyền (FR-02, FR-03)</h3>
+              <form onSubmit={createUser} className="grid grid-cols-2 gap-2">
+                <input placeholder="Họ tên" value={newUser.hoTen} onChange={e => setNewUser({ ...newUser, hoTen: e.target.value })} className="border rounded p-1.5" required />
+                <input placeholder="Email" value={newUser.email} onChange={e => setNewUser({ ...newUser, email: e.target.value })} className="border rounded p-1.5" required />
+                <input type="password" placeholder="Mật khẩu (>=6)" value={newUser.password} onChange={e => setNewUser({ ...newUser, password: e.target.value })} className="border rounded p-1.5" required />
+                <select value={newUser.vaiTro} onChange={e => setNewUser({ ...newUser, vaiTro: e.target.value })} className="border rounded p-1.5">
+                  <option value="DATA_ANALYST">DATA_ANALYST</option>
+                  <option value="ADMIN">ADMIN</option>
+                </select>
+                <button type="submit" className="col-span-2 bg-[#1f4e78] text-white py-1.5 rounded font-semibold">Tạo tài khoản</button>
+              </form>
+              <div className="divide-y max-h-52 overflow-y-auto">
+                {users.map(u => (
+                  <div key={u._id} className="py-2 flex justify-between items-center">
+                    <div><b>{u.hoTen}</b> ({u.email}) — <span className="text-blue-700 font-semibold">{u.vaiTro}</span></div>
+                    <button onClick={() => toggleActive(u)} className={`px-2 py-0.5 rounded font-semibold ${u.trangThai ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"}`}>
+                      {u.trangThai ? "Đang mở (Khóa)" : "Đã khóa (Mở)"}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {config && (
+              <form onSubmit={saveConfig} className="bg-white p-5 rounded-xl shadow-sm space-y-3">
+                <h3 className="font-bold text-sm text-[#1f4e78]">Cấu hình Hệ thống & Cảnh báo (FR-04, FR-23)</h3>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-semibold mb-1">Lịch ETL (Cron)</label>
+                    <input value={config.etl_schedule_cron || ""} onChange={e => setConfig({ ...config, etl_schedule_cron: e.target.value })} className="w-full border rounded p-1.5" />
+                  </div>
+                  <div>
+                    <label className="block font-semibold mb-1">Ngưỡng lệch dự báo (%)</label>
+                    <input type="number" step="0.5" value={config.alert_forecast_deviation_pct || 15} onChange={e => setConfig({ ...config, alert_forecast_deviation_pct: Number(e.target.value) })} className="w-full border rounded p-1.5" />
+                  </div>
+                  <div>
+                    <label className="block font-semibold mb-1">Ngưỡng At Risk (%)</label>
+                    <input type="number" step="0.5" value={config.alert_at_risk_spike_pct || 10} onChange={e => setConfig({ ...config, alert_at_risk_spike_pct: Number(e.target.value) })} className="w-full border rounded p-1.5" />
+                  </div>
+                  <div className="flex items-center gap-3 pt-4">
+                    <label><input type="checkbox" checked={!!config.notify_in_app} onChange={e => setConfig({ ...config, notify_in_app: e.target.checked })} /> In-App</label>
+                    <label><input type="checkbox" checked={!!config.notify_email} onChange={e => setConfig({ ...config, notify_email: e.target.checked })} /> Email</label>
+                  </div>
+                </div>
+                <button type="submit" className="bg-emerald-600 text-white px-4 py-1.5 rounded font-semibold">Lưu cấu hình</button>
+              </form>
+            )}
+          </div>
+
+          <div className="bg-white p-5 rounded-xl shadow-sm">
+            <h3 className="font-bold text-sm text-[#1f4e78] mb-2">Nhật ký hoạt động - Audit Log (FR-05)</h3>
+            <div className="max-h-56 overflow-y-auto divide-y">
+              {logs.map(l => (
+                <div key={l._id} className="py-1.5 flex justify-between">
+                  <span><b>{l.email}</b> [{l.role}] → <span className="text-blue-700">{l.action}</span> ({l.target})</span>
+                  <span className="text-slate-400">{l.timestamp?.slice(0, 19)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ==================== 6. DATA ANALYST: ETL & CHẤT LƯỢNG DỮ LIỆU ====================
+    function EtlTab({ token }) {
+      const [jobs, setJobs] = useState([]);
+      const [dq, setDq] = useState(null);
+      const [file, setFile] = useState(null);
+      const [anom, setAnom] = useState({ start_date: "2026-10-01", end_date: "2026-10-02", reason: "", exclude_from_training: true });
+
+      const load = () => {
+        apiFetch("/etl/jobs", {}, token).then((r) => setJobs(r.jobs || []));
+        apiFetch("/data-quality/report", {}, token).then(setDq);
+      };
+      useEffect(() => { load(); }, [token]);
+
+      const upload = async () => {
+        if (!file) return;
+        const fd = new FormData();
+        fd.append("file", file);
+        try {
+          await apiFetch("/etl/upload", { method: "POST", body: fd }, token);
+          load();
+        } catch (err) { alert(err.message); }
+      };
+
+      const markAnomaly = async (e) => {
+        e.preventDefault();
+        await apiFetch("/data-quality/anomalies", { method: "POST", body: JSON.stringify(anom) }, token);
+        alert("Đã đánh dấu giai đoạn dữ liệu bất thường!");
+        setAnom({ ...anom, reason: "" });
+      };
+
+      return (
+        <div className="space-y-5 text-xs">
+          <div className="bg-white p-5 rounded-xl shadow-sm flex flex-wrap gap-3 items-center justify-between">
+            <div className="flex items-center gap-3">
+              <input type="file" accept=".csv,.xlsx" onChange={(e) => setFile(e.target.files[0])} />
+              <button onClick={upload} className="bg-slate-800 text-white px-4 py-2 rounded font-semibold">Import CSV/Excel (FR-29)</button>
+            </div>
+            <button onClick={() => apiFetch("/etl/rerun", { method: "POST" }, token).then(load)} className="bg-amber-600 text-white px-4 py-2 rounded font-semibold">Chạy lại tính RFM (FR-28)</button>
+          </div>
+          {dq && (
+            <div className="grid grid-cols-3 gap-4">
+              <div className="bg-white p-4 rounded-xl shadow-sm"><b>Tổng đơn COMPLETED:</b> {dq.total_completed_orders}</div>
+              <div className="bg-white p-4 rounded-xl shadow-sm"><b>Outlier (IQR - FR-30):</b> {dq.outliers_iqr_count}</div>
+              <div className="bg-white p-4 rounded-xl shadow-sm"><b>Thiếu ID Khách:</b> {dq.missing_customer_ref}</div>
+            </div>
+          )}
+          <form onSubmit={markAnomaly} className="bg-white p-5 rounded-xl shadow-sm flex flex-wrap gap-3 items-end">
+            <div><label className="block font-semibold mb-1">Từ ngày</label><input type="date" value={anom.start_date} onChange={e => setAnom({ ...anom, start_date: e.target.value })} className="border rounded p-1.5" /></div>
+            <div><label className="block font-semibold mb-1">Đến ngày</label><input type="date" value={anom.end_date} onChange={e => setAnom({ ...anom, end_date: e.target.value })} className="border rounded p-1.5" /></div>
+            <div className="flex-1"><label className="block font-semibold mb-1">Lý do bất thường (FR-44)</label><input placeholder="VD: Lỗi sập hệ thống thanh toán..." value={anom.reason} onChange={e => setAnom({ ...anom, reason: e.target.value })} className="w-full border rounded p-1.5" required /></div>
+            <button type="submit" className="bg-red-600 text-white px-4 py-1.5 rounded font-semibold">Đánh dấu loại trừ khi train</button>
+          </form>
+          <div className="bg-white p-5 rounded-xl shadow-sm">
+            <h3 className="font-bold text-sm text-[#1f4e78] mb-2">Lịch sử ETL Jobs (FR-26, FR-27)</h3>
+            {jobs.map((j) => (
+              <div key={j._id} className="py-2 border-b flex justify-between">
+                <span>{j.filename} ({j.triggered_by})</span>
+                <span className={j.status === "SUCCESS" ? "text-emerald-600 font-bold" : "text-red-600 font-bold"}>{j.status} {j.error && `- ${j.error}`}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // ==================== 7. DATA ANALYST: HUẤN LUYỆN & ĐÁNH GIÁ ML ====================
+    function AnalystTrainTab({ token }) {
+      const [models, setModels] = useState([]);
+      const [cfg, setCfg] = useState({ model_type: "Hybrid_Prophet_XGBoost", category: "ALL", test_days: 30, n_estimators: 250, learning_rate: 0.05, max_depth: 5, exclude_anomalies: true });
+      const [training, setTraining] = useState(false);
+
+      const loadModels = () => apiFetch("/models", {}, token).then((r) => setModels(r.models || []));
+      useEffect(() => { loadModels(); }, [token]);
+
+      const trainModel = async (e) => {
+        e.preventDefault();
+        setTraining(true);
+        try {
+          await apiFetch("/models/train", { method: "POST", body: JSON.stringify(cfg) }, token);
+          await loadModels();
+        } catch (err) { alert(err.message); } finally { setTraining(false); }
+      };
+
+      return (
+        <div className="space-y-5 text-xs">
+          <form onSubmit={trainModel} className="bg-white p-5 rounded-xl shadow-sm grid grid-cols-2 sm:grid-cols-6 gap-3 items-end">
+            <div className="col-span-2">
+              <label className="block font-semibold mb-1">Thuật toán (FR-31)</label>
+              <select value={cfg.model_type} onChange={(e) => setCfg({ ...cfg, model_type: e.target.value })} className="w-full border rounded p-2">
+                <option value="Hybrid_Prophet_XGBoost">Hybrid Prophet + XGBoost</option>
+                <option value="XGBoost">XGBoost</option>
+                <option value="Prophet">Facebook Prophet</option>
+                <option value="SARIMA">SARIMA</option>
+              </select>
+            </div>
+            <div><label className="block font-semibold mb-1">Test days</label><input type="number" value={cfg.test_days} onChange={e => setCfg({ ...cfg, test_days: Number(e.target.value) })} className="w-full border rounded p-2" /></div>
+            <div><label className="block font-semibold mb-1">Trees</label><input type="number" value={cfg.n_estimators} onChange={e => setCfg({ ...cfg, n_estimators: Number(e.target.value) })} className="w-full border rounded p-2" /></div>
+            <div><label className="block font-semibold mb-1">LR</label><input type="number" step="0.01" value={cfg.learning_rate} onChange={e => setCfg({ ...cfg, learning_rate: Number(e.target.value) })} className="w-full border rounded p-2" /></div>
+            <button type="submit" disabled={training} className="bg-slate-800 text-white py-2 px-3 rounded font-semibold">
+              {training ? "Đang train..." : "Train Model (FR-32)"}
+            </button>
+          </form>
+
+          <div className="bg-white p-5 rounded-xl shadow-sm overflow-x-auto">
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="font-bold text-sm text-[#1f4e78]">So sánh Metrics & Phiên bản (FR-33, FR-35)</h3>
+              <button onClick={() => {
+                fetch(`${API_BASE}/export/technical`, { headers: { Authorization: `Bearer ${token}` } })
+                  .then(r => r.blob()).then(b => {
+                    const a = document.createElement("a");
+                    a.href = URL.createObjectURL(b);
+                    a.download = "bao_cao_ky_thuat_ml.xlsx";
+                    a.click();
+                  });
+              }} className="bg-emerald-600 text-white px-3 py-1 rounded font-semibold">Xuất Báo cáo Kỹ thuật (FR-43)</button>
+            </div>
+            <table className="w-full text-left">
+              <thead><tr className="bg-slate-100"><th className="p-2">Version</th><th className="p-2">Loại</th><th className="p-2">MAPE</th><th className="p-2">RMSE</th><th className="p-2">MAE</th><th className="p-2">R²</th><th className="p-2">Trạng thái</th></tr></thead>
+              <tbody className="divide-y">
+                {models.map((m) => (
+                  <tr key={m._id}>
+                    <td className="p-2 font-mono">{m.version}</td>
+                    <td className="p-2">{m.model_type}</td>
+                    <td className="p-2 font-bold">{(m.metrics.MAPE * 100).toFixed(2)}%</td>
+                    <td className="p-2">{fmtVND(m.metrics.RMSE)}</td>
+                    <td className="p-2">{fmtVND(m.metrics.MAE)}</td>
+                    <td className="p-2">{m.metrics.R2_Score}</td>
+                    <td className="p-2"><span className={`px-2 py-0.5 rounded font-semibold ${m.status === "PRODUCTION" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>{m.status}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      );
+    }
+
+    // ==================== 8. DATA ANALYST: PHÂN TÍCH CHUYÊN SÂU & SLA ====================
+    function DeepAnalyticsTab({ token }) {
+      const [cohort, setCohort] = useState(null);
+      const [decomp, setDecomp] = useState(null);
+      const [perf, setPerf] = useState(null);
+      const [pipelineText, setPipelineText] = useState('[{"$match": {"trangThaiDon": "COMPLETED"}}, {"$group": {"_id": "$kenhBanHang", "tong": {"$sum": "$doanhThuThuan"}}}]');
+      const [aggRes, setAggRes] = useState(null);
+      const decompRef = useRef(null);
+      const decompInst = useRef(null);
+
+      useEffect(() => {
+        apiFetch("/analytics/cohort", {}, token).then(setCohort).catch(() => {});
+        apiFetch("/analytics/decomposition", {}, token).then(setDecomp).catch(() => {});
+        apiFetch("/monitoring/performance", {}, token).then(setPerf).catch(() => {});
+      }, [token]);
+
+      useEffect(() => {
+        if (!decomp || !decompRef.current) return;
+        if (decompInst.current) decompInst.current.destroy();
+        decompInst.current = new Chart(decompRef.current.getContext("2d"), {
+          type: "line",
+          data: {
+            labels: decomp.dates,
+            datasets: [
+              { label: "Trend (Xu hướng)", data: decomp.trend, borderColor: "#1f4e78", tension: 0.2 },
+              { label: "Seasonal (Mùa vụ 7d)", data: decomp.seasonal, borderColor: "#10b981", tension: 0.2 },
+            ],
+          },
+          options: { responsive: true, maintainAspectRatio: false },
+        });
+      }, [decomp]);
+
+      const runCustomAgg = async () => {
+        try {
+          const pipeline = JSON.parse(pipelineText);
+          const r = await apiFetch("/analytics/custom-aggregate", { method: "POST", body: JSON.stringify({ collection: "don_hang", pipeline }) }, token);
+          setAggRes(r.results);
+        } catch (err) { alert(err.message); }
+      };
+
+      return (
+        <div className="space-y-6 text-xs">
+          {perf && (
+            <div className="bg-white p-4 rounded-xl shadow-sm flex flex-wrap gap-6 items-center">
+              <span className="font-bold text-[#1f4e78]">Giám sát Hiệu năng SLA (FR-40, FR-41):</span>
+              <span>Độ trễ TB: <b>{perf.avg_latency_ms} ms</b></span>
+              <span>Max: <b>{perf.max_latency_ms} ms</b></span>
+              <span>Vi phạm SLA (100 req gần nhất): <b className={perf.sla_breaches_in_last_100 > 0 ? "text-red-600" : "text-emerald-600"}>{perf.sla_breaches_in_last_100}</b></span>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="bg-white p-5 rounded-xl shadow-sm">
+              <h3 className="font-bold text-sm text-[#1f4e78] mb-2">Phân rã Chuỗi thời gian - Trend & Seasonality (FR-39)</h3>
+              <div className="h-64"><canvas ref={decompRef}></canvas></div>
+            </div>
+
+            {cohort && (
+              <div className="bg-white p-5 rounded-xl shadow-sm overflow-x-auto">
+                <div className="flex justify-between mb-2">
+                  <h3 className="font-bold text-sm text-[#1f4e78]">Phân tích Cohort Khách hàng (FR-37)</h3>
+                  <span>CLV TB (FR-38): <b className="text-emerald-700">{fmtVND(cohort.avg_clv)}</b></span>
+                </div>
+                <div className="max-h-60 overflow-y-auto divide-y">
+                  {Object.entries(cohort.cohorts || {}).map(([m, vals]) => (
+                    <div key={m} className="py-1.5 flex justify-between">
+                      <span className="font-mono font-bold">{m}</span>
+                      <span>{Object.entries(vals).slice(0, 5).map(([p, c]) => `M${p}:${c}`).join(" | ")}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="bg-white p-5 rounded-xl shadow-sm space-y-3">
+            <h3 className="font-bold text-sm text-[#1f4e78]">Truy vấn MongoDB Aggregation Tùy chỉnh (FR-36)</h3>
+            <textarea rows={3} value={pipelineText} onChange={e => setPipelineText(e.target.value)} className="w-full border rounded p-2 font-mono"></textarea>
+            <button onClick={runCustomAgg} className="bg-slate-800 text-white px-4 py-1.5 rounded font-semibold">Thực thi Pipeline</button>
+            {aggRes && <pre className="bg-slate-900 text-emerald-300 p-3 rounded overflow-x-auto">{JSON.stringify(aggRes, null, 2)}</pre>}
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>
